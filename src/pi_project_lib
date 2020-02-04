@@ -1,0 +1,144 @@
+#!/bin/bash
+
+#Support file for pi_project scripts.  Place in the same directory as the
+#script to be run.
+
+if [ "$EUID" -ne 0 ] && [ -x /usr/bin/sudo ]; then
+	SUDO="/usr/bin/sudo "
+elif [ "$EUID" -ne 0 ] && [ -x /bin/sudo ]; then
+	SUDO="/bin/sudo "
+fi
+
+pi_project_lib_ver='0.5'
+
+
+fail () {
+	echo "$@"', exiting.' >&2
+	exit 1
+}
+
+
+wtg() {
+	#Wait to go
+	echo "Press enter to continue" >&2
+	read junk <&2
+}
+
+
+install_file () {
+	if [ -z "$2" ]; then
+		echo 'Missing destination directory in install_file, exiting.'
+		exit 1
+	fi
+
+	if [ -s "$2" ]; then
+		echo "$2 already exists, skipping" >&2
+	elif [ -w "`dirname $2`" ]; then
+		curl -sSL "$1" -o "$2"
+	else
+		$SUDO curl -sSL "$1" -o "$2"
+	fi
+}
+
+
+install_packages () {
+	if [ -x /usr/bin/apt ]; then
+		install_cmd='/usr/bin/apt -y install '
+	elif [ -x /usr/bin/yum ]; then
+		install_cmd='/usr/bin/yum -y install '
+	else
+		echo 'Unable to locate apt or yum, unable to install packages, exiting.'
+		exit 1
+	fi
+
+	for one_pkg in "$@" ; do
+		case "$one_pkg" in
+		Adafruit-Blinka)
+			$SUDO pip3 install "$one_pkg"
+			;;
+		*)
+			$SUDO $install_cmd "$one_pkg"
+			;;
+		esac
+	done
+}
+
+
+
+patch_os () {
+	if [ -x /usr/bin/apt ]; then
+		$SUDO /usr/bin/apt --allow-releaseinfo-change update && $SUDO /usr/bin/apt -y full-upgrade && $SUDO /usr/bin/apt -y autoremove
+	elif [ -x /usr/bin/yum ]; then
+		$SUDO /usr/bin/yum -y update
+	else
+		echo 'Unable to locate apt or yum, unable to install packages, exiting.'
+		exit 1
+	fi
+
+	if [ -x /usr/bin/pip3 ]; then
+		#Update packages one at a time instead of all at once so a single upgrade failure won't stop any remaining upgrades from being attempted
+		$SUDO /usr/bin/pip3 freeze | cut -d '=' -f 1 | $SUDO xargs -n1 /usr/bin/pip3 install -U
+	fi
+	if [ -x /usr/bin/pip ]; then
+		$SUDO /usr/bin/pip freeze | cut -d '=' -f 1 | $SUDO xargs -n1 /usr/bin/pip install -U
+	fi
+}
+
+
+remove_packages () {
+	if [ -x /usr/bin/apt ]; then
+		remove_cmd='/usr/bin/apt -y remove '
+	elif [ -x /usr/bin/yum ]; then
+		remove_cmd='/usr/bin/yum -y erase '
+	else
+		echo 'Unable to locate apt or yum, unable to install packages, exiting.'
+		exit 1
+	fi
+
+	$SUDO $remove_cmd "$@"
+}
+
+
+require_util() {
+	#Returns true if all binaries listed as parameters exist somewhere in the path, False if one or more missing.
+	while [ -n "$1" ]; do
+		if ! type -path "$1" >/dev/null 2>/dev/null ; then
+			echo Missing utility "$1". Please install it. >&2
+			return 1	#False, app is not available.
+		fi
+		shift
+	done
+	return 0	#True, app is there.
+} #End of requireutil
+
+
+append_if_missing () {
+	#Params: $1 is the file in question, $2 is the text to append
+
+	if [ ! -e "$1" ]; then
+		parent_dir=`dirname "$1"`
+		if $SUDO [ ! -e "$parent_dir" ]; then
+			$SUDO mkdir -p "$parent_dir"
+		fi
+		if $SUDO [ ! -d "$parent_dir" ]; then
+			echo "Unable to make directory $parent_dir in append_if_missing, exiting."
+			exit 1
+		fi
+		$SUDO touch "$1"
+		$SUDO chown --reference="$parent_dir" "$1"
+	fi
+
+	if ! $SUDO grep -q '^'"$2"'$' "$1" 2>/dev/null ; then
+		if [ -w "$parent_dir" -o -w "$1" ]; then
+			echo "$2" | tee -a "$1" >/dev/null
+		else
+			echo "$2" | $SUDO tee -a "$1" >/dev/null
+		fi
+	fi
+
+}
+
+
+status () {
+	echo "$@" >&2
+}
