@@ -1,0 +1,150 @@
+#!/bin/bash
+
+#V0.6
+
+if [ -s pi_project_lib ]; then
+	. pi_project_lib
+elif [ -s `dirname $0`/pi_project_lib ]; then
+	. `dirname $0`/pi_project_lib
+else
+	echo "pi_project_lib not found, exiting."
+	exit 1
+fi
+
+status '======== Package install/update/removal - may take a while'
+require_util pip3 2>/dev/null							|| install_packages python3-pip		#Needed to install and upgrade python packages
+require_util i2cdetect 2>/dev/null						|| install_packages i2c-tools		#Needed to detect i2c screen
+[ -x /usr/bin/sdl-config ]							|| install_packages libsdl1.2-dev	#Needed for python package updates
+[ -f /usr/include/arm-linux-gnueabihf/ffi.h ]					|| install_packages libffi-dev		#Needed for python package updates
+[ -f /usr/include/openssl/opensslv.h ]						|| install_packages libssl-dev		#Needed for python package updates
+wtg
+
+patch_os
+wtg
+
+$SUDO apt-get -y remove claws-mail claws-mail-i18n \
+libreoffice libreoffice-avmedia-backend-gstreamer libreoffice-base libreoffice-base-core libreoffice-base-drivers \
+libreoffice-calc libreoffice-common libreoffice-core libreoffice-draw libreoffice-gtk libreoffice-gtk2 libreoffice-help-en-gb \
+libreoffice-impress libreoffice-java-common libreoffice-l10n-en-gb libreoffice-librelogo libreoffice-math libreoffice-nlpsolver \
+libreoffice-ogltrans libreoffice-pdfimport libreoffice-pi libreoffice-report-builder libreoffice-report-builder-bin \
+libreoffice-script-provider-bsh libreoffice-script-provider-js libreoffice-script-provider-python libreoffice-sdbc-hsqldb \
+libreoffice-sdbc-postgresql libreoffice-style-galaxy libreoffice-style-tango libreoffice-systray libreoffice-wiki-publisher \
+libreoffice-writer \
+minecraft-pi \
+vlc vlc-bin vlc-data vlc-l10n vlc-plugin-base vlc-plugin-notify vlc-plugin-qt vlc-plugin-samba vlc-plugin-skins2 \
+vlc-plugin-video-output vlc-plugin-video-splitter vlc-plugin-visualization \
+wolfram-engine wolframscript
+wtg
+
+$SUDO pip3 install RPI.GPIO
+$SUDO pip3 install Adafruit-Blinka
+$SUDO pip3 install adafruit-circuitpython-ssd1306
+
+install_packages Adafruit-Blinka adafruit-circuitpython-ssd1306 apg curl feh fonts-dejavu-core gxmessage lshw python3-numpy python3-pil rpi-eeprom rpi-eeprom-images rsync screen spi-tools spidev uhubctl wget x11-utils xorg-x11-apps
+wtg
+
+require_util $SUDO chmod chown curl grep mkdir pip3 sed tee touch || fail "A required utility is not installed."
+wtg
+
+status '======== File-level changes'
+$SUDO mkdir -p /var/toshow/ /usr/local/bin/ /home/pic/
+$SUDO chown -R pi.pi /var/toshow/ /home/pic/
+wtg
+
+append_if_missing /etc/modules 'i2c-dev'
+append_if_missing /etc/modules 'spi-dev'
+append_if_missing /boot/config.txt 'dtparam=i2c_arm=on'
+append_if_missing /boot/config.txt 'dtparam=spi=on'
+append_if_missing /boot/config.txt '# Disable the ACT LED on the Pi Zero.'
+append_if_missing /boot/config.txt 'dtparam=act_led_trigger=none'
+append_if_missing /boot/config.txt 'dtparam=act_led_activelow=on'
+
+
+require_util update-rc.d 2>/dev/null						|| install_packages init-system-helpers
+install_file https://raw.githubusercontent.com/activecm/pi_show/master/pi_show.py /usr/local/bin/pi_show.py
+[ -x /usr/local/bin/pi_show.py ]						|| $SUDO chmod 755 /usr/local/bin/pi_show.py
+
+#FIXME - test for python3.8, then python3.7....
+[ -d /usr/local/lib/python3.7/dist-packages/waveshare_epd/ ]			|| $SUDO mkdir /usr/local/lib/python3.7/dist-packages/waveshare_epd/
+
+install_file https://raw.githubusercontent.com/waveshare/e-Paper/master/RaspberryPi%26JetsonNano/python/lib/waveshare_epd/epdconfig.py /usr/local/lib/python3.7/dist-packages/waveshare_epd/epdconfig.py
+#FIXME - later copy all display drivers
+#Note: "epd2in7b.py" is for the 3 color display
+install_file https://raw.githubusercontent.com/waveshare/e-Paper/master/RaspberryPi%26JetsonNano/python/lib/waveshare_epd/epd2in7.py /usr/local/lib/python3.7/dist-packages/waveshare_epd/epd2in7.py
+
+install_file https://raw.githubusercontent.com/waveshare/e-Paper/master/RaspberryPi%26JetsonNano/python/examples/epd_2in7_test.py /home/pi/epd_2in7_test.py
+install_file https://raw.githubusercontent.com/waveshare/e-Paper/master/RaspberryPi%26JetsonNano/python/pic/Font.ttc /home/pic/Font.ttc
+install_file https://raw.githubusercontent.com/waveshare/e-Paper/master/RaspberryPi%26JetsonNano/python/pic/2in7.bmp /home/pic/2in7.bmp
+install_file https://raw.githubusercontent.com/waveshare/e-Paper/master/RaspberryPi%26JetsonNano/python/pic/100x100.bmp /home/pic/100x100.bmp
+install_file https://raw.githubusercontent.com/waveshare/e-Paper/master/RaspberryPi%26JetsonNano/python/pic/2in7_Scale.bmp /home/pic/2in7_Scale.bmp
+
+$SUDO chown root.root /usr/local/bin/pi_show.py /usr/local/lib/python3.7/dist-packages/waveshare_epd/  /usr/local/lib/python3.7/dist-packages/waveshare_epd/epdconfig.py /usr/local/lib/python3.7/dist-packages/waveshare_epd/epd2in7.py
+
+$SUDO rm -f /etc/rc.local.new
+$SUDO cat /etc/rc.local | grep -v '^exit 0$' | $SUDO tee /etc/rc.local.new >/dev/null
+append_if_missing /etc/rc.local.new '#To re-enable HDMI, use /usr/bin/tvservice -p'
+append_if_missing /etc/rc.local.new '/usr/bin/tvservice -o'					#Power off HDMI port to save power
+append_if_missing /etc/rc.local.new '#To re-enable the USB port, use echo 1 | sudo tee /sys/devices/platform/soc/20980000.usb/buspower >/dev/null'
+append_if_missing /etc/rc.local.new 'echo 0 | tee /sys/devices/platform/soc/20980000.usb/buspower >/dev/null'
+
+
+#append_if_missing /etc/rc.local.new 'rm -f /tmp/internet_live /var/toshow/[0-9][0-9]*.txt'
+append_if_missing /etc/rc.local.new '/usr/local/bin/pi_show.py >/tmp/pi_show.out 2>&1 &'
+append_if_missing /etc/rc.local.new 'exit 0'
+$SUDO mv /etc/rc.local /etc/rc.local.backup
+$SUDO mv /etc/rc.local.new /etc/rc.local
+$SUDO chown root.root /etc/rc.local
+$SUDO chmod 755 /etc/rc.local
+
+
+#Consider using these in message_xfer
+#iwconfig wlan0 txpower off		#Power off transmitter
+#iwconfig wlan0 txpower auto		#Power it back on
+if [ ! -e /usr/local/bin/message_xfer ]; then
+	append_if_missing /usr/local/bin/message_xfer '#!/bin/bash'
+	$SUDO chown root.root /usr/local/bin/message_xfer
+	$SUDO chmod 755 /usr/local/bin/message_xfer
+fi
+
+$SUDO touch /boot/ssh
+$SUDO update-rc.d ssh enable
+wtg
+
+status '======== Set up ssh keys'
+if [ ! -e "$HOME/.ssh/id_rsa_messagexfer" -o ! -e "$HOME/.ssh/id_rsa_messagexfer.pub" ]; then
+	echo "Generating a new ssh keypair"
+	ssh-keygen -b 2048 -t rsa -N '' -f "$HOME/.ssh/id_rsa_messagexfer"
+fi
+
+cmd_out=''
+while [ "$cmd_out" != "Success" ]; do
+	echo "Please enter the computer name or IP address on which the logs are found:"
+	read message_system
+	echo "Please enter the user account on that system to which we ssh:"
+	read message_user
+	echo "Please enter the directory containing the messages: (starting from the root)"
+	read message_path
+	echo "About to connect to $message_user on $message_system .  If asked to confirm ssh host key, please do so.  You'll be asked for the password for that user on that system."
+
+	cat ~/.ssh/id_rsa_messagexfer.pub 2>/dev/null \
+	 | ssh "${message_user}@${message_system}" 'mkdir -p .ssh ; cat >>.ssh/authorized_keys ; chmod go-rwx ./ .ssh/ .ssh/authorized_keys'
+
+	cmd_out=`ssh -o 'PasswordAuthentication=no' -o 'PreferredAuthentications=publickey' -i "$HOME/.ssh/id_rsa_messagexfer" "${message_user}@${message_system}" 'touch .ssh/reached-by-key ; echo Success'`
+	if [ "$cmd_out" = "Success" ]; then
+		append_if_missing /etc/cron.d/message_xfer '*/5 * * * * pi /usr/local/bin/message_xfer'
+		append_if_missing /usr/local/bin/message_xfer "/usr/bin/rsync -av --delete --exclude '00*' -T /var/tmp/ -e 'ssh -i $HOME/.ssh/id_rsa_messagexfer' ${message_user}@${message_system}:${message_path}/ /var/toshow/"
+		$SUDO service cron reload
+	else
+		echo "Unable to ssh to ${message_user}@${message_system} with the ssh keys.  Trying again." >&2
+	fi
+done
+wtg
+
+sync
+sleep 1
+sync
+sleep 1
+echo 'About to reboot, press enter to reboot or Ctrl-c to abort.  Note, you must reboot before all settings are active.'
+read JUNK
+$SUDO reboot
+
